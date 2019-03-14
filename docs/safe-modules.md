@@ -1,28 +1,28 @@
-# Safe JavaScript Modules
+# Safe JavaScript Modules<a id="safe-modules"></a>
 
 Written by Mark S. Miller, Darya Melicher, Kate Sills, and JF Paradis in December 2018
 
-Introduction
+Introduction<a id="introduction"></a>
 ============
 
 Recently, the [event-stream incident](https://blog.npmjs.org/post/180565383195/details-about-the-event-stream-incident) demonstrated that current JavaScript module systems leave application developers widely vulnerable to malicious attacks. This proposal outlines a JavaScript module loader that is significantly safer, to the point of preventing similar malicious attacks entirely.
 
 The goal of this proposal is enforce the [Principle of Least Authority (POLA)](https://agoric.com/references/#pola) on all imported modules, meaning that the modules should only be given the authority that they need to accomplish their tasks and no more. To accomplish this goal, we must have the ability to isolate modules from each other as well as the ability to cut off access to powerful resources such as the file system or network by default.
 
-[Realms](https://github.com/tc39/proposal-realms), an ECMAScript proposal currently at Stage 2, was proposed by some of us as a necessary tool to enforce the principle of least authority. The Realm API enables the creation of distinct global environments. This global environment, called a realm, has its own global object, copy of the standard library, and primordials. A realm can contain many co-existing featherweight compartments. However, with Realms alone, these compartments do not provide genuine protection from each other.
+[Realms](https://github.com/tc39/proposal-realms), an ECMAScript proposal currently at Stage 2, was proposed by some of us as a necessary tool to enforce the principle of least authority. The Realm API enables the creation of distinct global environments. This global environment, called a realm, has its own global object, copy of the standard library, and primordials[1]. A realm can contain many co-existing featherweight compartments. However, with Realms alone, these compartments do not provide genuine protection from each other.
 
 To that end, we built [Secure EcmaScript (SES)](https://github.com/agoric/ses) on top of Realms. SES hardens the root realm such that these compartments are genuine protection domains. Each compartment shares its root realm's primordials but has its own global object, global scope, and named evaluators (the eval function and the Function constructor), which evaluate code in that compartment's global scope. With SES, we successfully achieve the isolation of code execution.
 
 However, while Realms and SES provide security, they do not yet incorporate a module system that easily allows for code reuse. This document outlines a plan for a module system that is easy to use and secure enough to prevent incidents like the event-stream exploit.
 
-Problems with Current JavaScript Modules
+Problems with Current JavaScript Modules<a id="problems"></a>
 ========================================
 
-Prior to the ES module system, linking various libraries could only be achieved by mutation and lookup in the global scope. For example, libraries such as jQuery were imported by loading a script file that would add a property (such as $) to window. Mutating the global scope in this way was accident-prone and unable to scale to multiple layers of dependencies. To address this problem, two module systems emerged for JavaScript: Common JS and the EcmaScript module system.
+Prior to the ES module system, linking various libraries could only be achieved by mutation and lookup in the global scope. For example, libraries such as jQuery were imported by loading a script file that would add a property (such as `$`) to `window`. Mutating the global scope in this way was accident-prone and unable to scale to multiple layers of dependencies. To address this problem, two module systems emerged for JavaScript: Common JS and the EcmaScript module system.
 
-The Common JS module system (CJS) emerged from efforts to run JavaScript on the server side and became the module system used by Node.js. Because CJS modules could not be used in the browser, other module systems emerged, including the standard EcmaScript module system (ESM), which enables static linkage analysis and is now available on all platforms. In the meantime, CJS modules became sufficiently common that host independent CJS modules are now supported on all platforms, sometimes through "packers," code that transforms a collection of CJS and ESM modules into standard scripts.
+The Common JS module system (CJS) emerged from efforts to run JavaScript on the server side and became the module system used by Node.js. Because CJS modules could not be used in the browser, other module systems emerged, including the standard EcmaScript module system (ESM), which enables static linkage analysis and is now available on all platforms. In the meantime, CJS modules became sufficiently common that host independent CJS modules are now supported on all platforms, sometimes through "bundlers," code that transforms a collection of CJS and ESM modules into standard scripts.
 
-Both CJS and ESM have become entrenched to the point that any realistic module system for JavaScript must accommodate their co-existence, even though standards documents only acknowledge the existence of ESM. Collections of both kinds of modules are delivered in packages, often distributed through npm or similar systems. For npm and some others, a package comes with a manifest, named package.json. There is now a massive legacy of useful packages. Systems are now built by linking together many modules written by many different parties into a single program. Often, this goes well, creating programs of great functionality by composing together the functionality expressed by this great number of modules.
+Both CJS and ESM have become entrenched to the point that any realistic module system for JavaScript must accommodate their co-existence, even though standards documents only acknowledge the existence of ESM. Collections of both kinds of modules are delivered in `packages`, often distributed through npm or similar systems. For npm and some others, a package comes with a manifest, named `package.json`. There is now a massive legacy of useful packages. Systems are now built by linking together many modules written by many different parties into a single program. Often, this goes well, creating programs of great functionality by composing together the functionality expressed by this great number of modules.
 
 However, even though an application can be divided into small units of independent and reusable code, nothing was done to protect these modules from each other. Currently modules can interfere with other modules, either unintentionally (as in the case of accidental tampering) or intentionally, as in the case of malicious code. In both cases, such interference limits the scale of systems we can compose reliably. We must find ways to use modules and compose them together, so that they can cooperate as we intend when things go well, but limit the damage when things go badly.
 
@@ -46,30 +46,30 @@ The current design of the JavaScript language and module systems give rise to th
 
 -   Modules can hold and share a state, allowing unintended and unauthorized communications channels. For example, modules can export:
 
--   A variable.
+    -   A variable.
 
--   A mutable object.
+    -   A mutable object.
 
--   A function which closes over a variable.
+    -   A function which closes over a variable.
 
--   An object which can hold a state, for example, a WeakMap.
+    -   An object which can hold a state, for example, a WeakMap.
 
-Threat Model
+Threat Model<a id="threat-model"></a>
 ============
 
-We follow the threat model as described in the Wyvern paper [1], including two common scenarios: malicious third-party code and fallible in-house code. Malicious third-party code is a major problem. Currently in Node, seemingly simplistic packages can access powerful resources such as network access, and could be sending our todo data to anywhere. Furthermore, because they also have access to the file system, they can send all our data anywhere. As in the Wyvern paper, we also care about fallible in-house code. For instance, we might be concerned that our own application will overwrite an important file if misconfigured.
+We follow the threat model as described in the Wyvern paper [[2](#2)], including two common scenarios: malicious third-party code and fallible in-house code. Malicious third-party code is a major problem. Currently in Node, seemingly simplistic packages can access powerful resources such as network access, and could be sending our todo data to anywhere. Furthermore, because they also have access to the file system, they can send all our data anywhere. As in the Wyvern paper, we also care about fallible in-house code. For instance, we might be concerned that our own application will overwrite an important file if misconfigured.
 
-Proposal
+Proposal<a id="proposal"></a>
 ========
 
-[Summary paragraph here]
+[TODO: Summary paragraph here]
 
-Pure and Resource Modules
+Pure and Resource Modules<a id="pure-resource-modules"></a>
 -------------------------
 
-Our proposal depends on the idea that some modules can be identified as intrinsically safer than other modules. For instance, a module that doesn't have access to the file system can't do as much damage as a module that does have access. We therefore define two kinds of modules: pure modules and resource modules. These names come from the Wyvern programming language [1], which features a capability-based module system. (One of the main contributors to Wyvern, Darya Melicher, is one of the authors of this proposal.) We adapt Wyvern's definitions as follows:
+Our proposal depends on the idea that some modules can be identified as intrinsically safer than other modules. For instance, a module that doesn't have access to the file system can't do as much damage as a module that *does* have access. We therefore define two kinds of modules: **pure modules** and **resource modules**. These names come from the Wyvern programming language [[2](#2)], which features a capability-based module system. (One of the main contributors to Wyvern, Darya Melicher, is one of the authors of this proposal.) We adapt Wyvern's definitions as follows:
 
-Pure values (pure objects in Wyvern) are values that (see the detailed [definition below](https://docs.google.com/document/d/1pPiu3cjBT5OqEgqtsdDJcW5g1QsgmxvIHQjdkrPej3U/edit#heading=h.8jrjqntutahv)):
+**Pure values** (pure objects in Wyvern) are values that (see the detailed [definition below](#pure-values-definition)):
 
 1.  do not encompass system resources (i.e. network access),
 
@@ -77,7 +77,7 @@ Pure values (pure objects in Wyvern) are values that (see the detailed [definiti
 
 3.  have no side effects.
 
-Pure modules are those modules that:
+**Pure modules** are those modules that[3]:
 
 1.  do not encompass system resources (i.e. network access),
 
@@ -91,7 +91,7 @@ Pure modules are those modules that:
 
 6.  declare themselves to be pure.
 
-Resource modules are defined as modules that either:
+**Resource modules** are defined as modules that either:
 
 1.  encapsulate system resources,
 
@@ -103,7 +103,7 @@ Resource modules are defined as modules that either:
 
 5.  export non pure values.
 
-For example, the popular request package would be a resource module because it imports Node's core http module which gives access to the network.
+For example, the popular `request` package would be a resource module because it imports Node's core `http` module which gives access to the network.
 
 From these definitions, it follows that pure modules can only import other pure modules. If a module imports a resource module instance it gets automatically categorized as a resource module itself, even if it would otherwise be pure.
 
@@ -114,42 +114,44 @@ Loaders
 
 Our distinction between pure and resource modules allows us to treat them differently. Verifiably pure modules can be loaded into a SES root realm together and shared with all its compartments without a loss of security. Resource modules, however, (and this includes everything that is not verifiably pure), must be loaded into separate SES compartments.
 
-SES provides a harden function, which performs a transitive walk over properties that aren't inherited, freezing every object it encounters. Harden additionally verifies that the objects that these objects inherit from are themselves already hardened.  Loaders for both pure and resource modules will apply harden automatically to all exported and imported values. For example, a loader would apply harden at the following points:
+SES provides a `harden`[4] function (see [@agoric/harden](https://github.com/Agoric/Harden#harden) for more information), which performs a transitive walk over properties that aren't inherited, freezing every object it encounters. Harden additionally verifies that the objects that these objects inherit from are themselves already hardened.  Loaders for both pure and resource modules will apply harden automatically to all exported and imported values. For example, a loader would apply harden at the following points:
 
+```js
 let x = harden(require("x"));
 
-function foo(y) {\
-  return [x, y];\
+function foo(y) {
+  return [x, y];
 }
 
 exports = harden({x, foo});
+```
 
 Given the use of harden and the assumption that module "x" is also verifiably pure, the above module is a pure module. The thought process of verifying that the above module is a pure module would go like this:
 
 -   Hardening the returned record freezes that record and hardens the function foo.
 
--   The function foo captures the variable x, but x is a let that is never assigned to and so is effectively const.
+-   The function `foo` captures the variable `x`, but `x` is a `let` that is never assigned to and so is effectively `const`.
 
--   The value that x is initialized to is the result of require and thus assumed to be pure.
+-   The value that `x` is initialized to is the result of `require` and thus assumed to be pure.
 
--   No variable can be accessed during their temporal dead zone. Within cyclic imports, this gets tricky to verify.
+-   No variable can be accessed during their temporal dead zone[5]. Within cyclic imports, this gets tricky to verify[6].
 
--   Note that the y parameter of foo may not be frozen. The array returned by foo is not frozen. All this is fine in SES and does not violate the purity of foo. Pure values can accept, create, and return impure values.
+-   Note that the `y` parameter of `foo` may not be frozen. The array returned by `foo` is not frozen. All this is fine in SES and does not violate the purity of `foo`. Pure values can accept, create, and return impure values.
 
 Access Control and Wiring
 -------------------------
 
-At this point, we have pure modules together in the root realm and resource modules in their own compartments. However, we have not yet described how these modules may be used, or how access to dangerous resources can be granted. There are two ways in which access control is specified in our proposed system: a manifest and authority-handling modules. A manifest is associated with a group of modules, or package, and can be thought of as similar to an npm package's package.json file. A manifest is declarative, and can express how packages are wired to each other, but can't fully express complex authority decisions. Complex authority decisions are best expressed in code, in authority-handling modules. In these modules, the application's authority can be subdivided, attenuated, or virtualized.
+At this point, we have pure modules together in the root realm and resource modules in their own compartments. However, we have not yet described how these modules may be used, or how access to dangerous resources can be granted. There are two ways in which access control is specified in our proposed system: a manifest and authority-handling modules. A manifest is associated with a group of modules, or `package`, and can be thought of as similar to an npm package's `package.json` file. A manifest is declarative, and can express how packages are wired to each other, but can't fully express complex authority decisions. Complex authority decisions are best expressed in code, in authority-handling modules. In these modules, the application's authority can be subdivided, attenuated, or virtualized.
 
 ### Concrete Example: Command Line Todo App
 
-To explain how this would work, let's use an concrete example. Let's say we are writing a command-line todo app. We can input and display tasks (we will ignore deleting tasks for now), and the task data is saved to a file. Our todo application runs on Node.js and imports the [chalk](https://www.npmjs.com/package/chalk) and [minimist](https://www.npmjs.com/package/minimist) packages, two of the [most widely used npm packages](https://www.npmjs.com/browse/depended).  chalk displays our todo list in various colors based on the task's priority, and minimist parses our command line arguments for us.
+To explain how this would work, let's use an concrete example. Let's say we are writing a command-line todo app. We can input and display tasks (we will ignore deleting tasks for now), and the task data is saved to a file. Our todo application runs on Node.js and imports the [chalk](https://www.npmjs.com/package/chalk) and [minimist](https://www.npmjs.com/package/minimist) packages, two of the [most widely used npm packages](https://www.npmjs.com/browse/depended).  Chalk displays our todo list in various colors based on the task's priority, and Minimist parses our command line arguments for us.
 
 [Minimist](https://github.com/substack/minimist/blob/master/index.js) is a pure module because it doesn't encompass any system resources, doesn't import any resource modules, doesn't contain or transitively reference any mutable state, has no side effects, and only exports a function for parsing args. We shall assume in our example that it declares itself pure. Because minimist is a pure module, minimist is loaded into the root realm.
 
-[Chalk](https://github.com/chalk/chalk), on the other hand, needs to know what system it is running on in order to know what colors it can use, so it imports a package called supports-color, which imports Node's os module. The os module includes functions that return the current platform and release. It also includes a function to set the scheduling priority of any process. Because of this, the os module is a resource module. And, because chalk transitively imports the os module, it is also a resource module.
+[Chalk](https://github.com/chalk/chalk), on the other hand, needs to know what system it is running on in order to know what colors it can use, so it imports a package called `supports-color`, which imports Node's `os` module. The `os` module includes functions that return the current platform and release. It also includes a function to set the scheduling priority of any process. Because of this, the `os` module is a resource module. And, because chalk transitively imports the `os` module, it is also a resource module.
 
-There are two distinct approaches that can be taken to use these modules securely. First, we can rewrite the modules such that the dangerous resources are passed in as a parameter and we can pass in virtualized or attenuated versions instead. Thus, chalk exports a function that has parameters (os, process) and in turn passes these on to supports-color. The second approach, the legacy approach, doesn't require a rewrite of the packages. Instead, a manifest details the wiring that should occur. For instance, supports-color shouldn't get the actual os module, but rather an attenuated version that drastically limits the properties available.
+There are two distinct approaches that can be taken to use these modules securely. First, we can rewrite the modules such that the dangerous resources are passed in as a parameter and we can pass in virtualized or attenuated versions instead. Thus, `chalk` exports a function that has parameters (`os`, `process`) and in turn passes these on to `supports-color`. The second approach, the legacy approach, doesn't require a rewrite of the packages. Instead, a manifest details the wiring that should occur. For instance, `supports-color` shouldn't get the actual `os` module, but rather an attenuated version that drastically limits the properties available.
 
 Both of these approaches may be used simultaneously in the same code base. Modules that can be rewritten in the functional style are preferred, but we assume that given the vast number of JavaScript packages, we need to be able to use legacy code as well.
 
@@ -157,207 +159,154 @@ We've created repositories that contain an example for both of these approaches.
 
 #### Functional Approach
 
-([example code](https://github.com/katelynsills/clean-todo))
+([example code](/examples/clean-todo))
 
-The functional approach is the most straightforward. Our todo app functionality uses three dangerous resources: the built-in node modules (fs and os) and the global variable process. It uses fs directly and os and process through chalk.
+The functional approach is the most straightforward. Our todo app functionality uses three dangerous resources: the built-in node modules (`fs` and `os`) and the global variable process. It uses `fs` directly and `os` and `process` through chalk.
 
-![](https://docs.google.com/drawings/u/1/d/sOoCckSAAphxrPH8XJ-wJGw/image?w=624&h=140&rev=193&ac=1&parent=1pPiu3cjBT5OqEgqtsdDJcW5g1QsgmxvIHQjdkrPej3U)
+![](./assets/clean-todo-import-diagram.png)
 
-By default, only the todo app itself has access to the build-in node modules and global variables. By using SES to provide featherweight secure compartments for loading modules, at this point, chalk and supports-color are loaded in their own compartments and do not have any access to os and process. We need to figure out how to grant access selectively and securely. Chalk, being a third party module, fits our first threat model of possibly malicious third party code. The direct use of fs by our todo app fits our second threat model of fallible in-house code. Furthermore, this example contains both resource modules and global variables, allowing us to show how to handle both.
+By default, only the todo app itself has access to the build-in node modules and global variables. By using SES to provide featherweight secure compartments for loading modules, at this point, chalk and supports-color are loaded in their own compartments and do not have any access to `os` and `process`. We need to figure out how to grant access selectively and securely. Chalk, being a third party module, fits our first threat model of possibly malicious third party code. The direct use of `fs` by our todo app fits our second threat model of fallible in-house code. Furthermore, this example contains both resource modules and global variables, allowing us to show how to handle both.
 
-Let's start with a [working version using current Node.js](https://gist.github.com/katelynsills/0c639e4bb20f791a4c997ba3e0df37c4). The file starts like this:
+Let's start with a working version using current Node.js. The file starts like this:
 
-1.  const fs = require('fs');
-
-2.  const parseArgs = require('minimist');
-
-3.  const chalk = require('chalk');
-
-5.  const todoFile =  'todo.txt'
-
-7.  const addTodoToFile =  (todo, priority='Medium')  =>  {
-
-8.  fs.appendFile(todoFile, `${priority}: ${todo} \n`,  (err)  =>  {
-
-9.  if  (err)  throw err;
-
-10. console.log('Todo was added');
-
-11. });
-
-12. }
-
-13. ....
+```js
+const fs = require('fs');
+const parseArgs = require('minimist');
+const chalk = require('chalk');
+const todoFile =  'todo.txt'
+const addTodoToFile =  (todo, priority='Medium')  =>  {
+  fs.appendFile(todoFile, `${priority}: ${todo} \n`,  (err)  =>  {
+    if  (err)  throw err;
+      console.log('Todo was added');
+    });
+  }
+  ...
+```
 
 The first step we need to take to enforce POLA is to attenuate the fs module. By attenuate, we mean reducing the authority to only what is essential. We can create a new module attenuate-fs to do this:
 
-1.  const harden = Object.freeze;
+``` js
+const harden = require('@agoric/harden');
+const todoPath =  'todo.txt';
+const checkFileName =  (path)  =>  {
+  if  (path !== todoPath)  {
+    throw Error(`This app does not have access to ${path}`);
+  }
+};
 
-3.  const todoPath =  'todo.txt';
+const attenuateFs =  (originalFs)  => harden({
+  appendFile:  (path, data, callback)  =>  {
+    checkFileName(path);
+    return originalFs.appendFile(path, data, callback);
+  },
+  createReadStream:  (path)  =>  {
+    checkFileName(path);
+    return originalFs.createReadStream(path);
+  },
+});
 
-5.  const checkFileName =  (path)  =>  {
+module.exports  = attenuateFs;
+```
 
-6.  if  (path !== todoPath)  {
+Now, instead of using the original `fs` when we try to append a todo, we can use an attenuated version that will error if we try to 1) use any fs functionality other than appendFile and createReadStream, or 2) if we try to call these methods with any file other than our predefined todo.txt file. The attenuated version looks like this:
 
-7.  throw Error(`This app does not have access to ${path}`);
+```js
+const fs = require('fs');
+const parseArgs = require('minimist');
+const chalk = require('chalk');
+const attenuateFs = require('attenuate-fs');
+const altFs = attenuateFs(fs);
 
-8.  }
+const todoFile =  'todo.txt';
 
-9.  };
-
-11. const attenuateFs =  (originalFs)  => harden({
-
-12. appendFile:  (path, data, callback)  =>  {
-
-13. checkFileName(path);
-
-14. return originalFs.appendFile(path, data, callback);
-
-15. },
-
-16. createReadStream:  (path)  =>  {
-
-17. checkFileName(path);
-
-18. return originalFs.createReadStream(path);
-
-19. },
-
-20. });
-
-22. module.exports  = attenuateFs;
-
-Now, instead of using the original fs when we try to append a todo, we can use an attenuated version that will error if we try to 1) use any fs functionality other than appendFile and createReadStream, or 2) if we try to call these methods with any file other than our predefined todo.txt file. The attenuated version looks like this:
-
-1.  const fs = require('fs');
-
-2.  const parseArgs = require('minimist');
-
-3.  const chalk = require('chalk');
-
-4.  const attenuateFs = require('attenuate-fs');
-
-6.  const altFs = attenuateFs(fs);
-
-8.  const todoFile =  'todo.txt';
-
-10. const addTodoToFile =  (todo, priority =  'Medium')  =>  {
-
-11. altFs.appendFile(todoFile, `${priority}: ${todo} \n`, err =>  {
-
-12. if  (err)  throw err;
-
-13. console.log('Todo was added');
-
-14. });
-
-15. };
-
-16. ...
+const addTodoToFile =  (todo, priority =  'Medium')  =>  {
+  altFs.appendFile(todoFile, `${priority}: ${todo} \n`, err =>  {
+    if  (err)  throw err;
+    console.log('Todo was added');
+  });
+};
+...
+```
 
 Thus, we've given our own code the least authority version of the file system - only the one file and only certain functions with that file. In a much larger example, attenuation like this can help a great deal with fallible in-house code that may accidentally misuse authority.
 
 But let's turn to the problem of potentially malicious third party code. Minimist is a pure module, so we are ok giving it zero access to the external world and using the pure module loader to check that it matches our definition of a pure module. Chalk, on the other hand, needs access to os and process to do its legitimate job, so we need to give access to those resources but at the same time, ensure that no additional access is provided.
 
-We start by rewriting chalk as a function that takes in os and process (see [diff](https://github.com/chalk/chalk/compare/master...katelynsills:master)):
+We start by rewriting chalk as a function that takes in `os` and `process`(see [diff](https://github.com/chalk/chalk/compare/master...katelynsills:master)):
 
-1.  const pureChalk =  (os, process)  =>  {
-
-2.  const stdoutColor = pureSupportsColor(os, process).stdout;
-
-3.  ...
+```js
+const pureChalk =  (os, process)  =>  {
+const stdoutColor = pureSupportsColor(os, process).stdout;
+...
+```
 
 Now we need to write rewrite supports-color in the same way ([diff)](https://github.com/chalk/supports-color/compare/master...katelynsills:master):
 
-1.  const pureSupportsColor =  (os, process)  =>  {
+```js
+const pureSupportsColor =  (os, process)  =>  {
+const  {env}  = process;
+...
+```
 
-2.  const  {env}  = process;
-
-3.  ...
-
-Note that supports-color no longer imports os itself and it only has access to the os andprocess passed to it. It has no access to the process variable provided by Node.js.
+Note that supports-color no longer imports `os` itself and it only has access to the `os` and `process` passed to it. It has no access to the `process` variable provided by Node.js.
 
 Now that we are in control of the resources that chalk and supports-color are using, let's attenuate them before passing them on. Going back to our todo-app index.js, it would look like this:
 
-1.  // built-in modules
+```js
+// built-in modules
+const fs = require('fs');
+const os = require('os');
 
-2.  const fs = require('fs');
+// our rewritten modules
+const parseArgs = require('minimist');
+const pureChalk = require('chalk');
 
-3.  const os = require('os');
+// our attenuating modules
+const attenuateProcess = require('attenuate-process');
+const attenuateOs = require('attenuate-os');
+const attenuateFs = require('attenuate-fs');
 
-5.  // our rewritten modules
+// attenuate
+const altProcess = attenuateProcess(process);
+const altOs = attenuateOs(os);
+const altFs = attenuateFs(fs);
+const chalk = pureChalk(altOs, altProcess);
 
-6.  const parseArgs = require('minimist');
+const todoFile =  'todo.txt';
 
-7.  const pureChalk = require('chalk');
-
-9.  // our attenuating modules
-
-10. const attenuateProcess = require('attenuate-process');
-
-11. const attenuateOs = require('attenuate-os');
-
-12. const attenuateFs = require('attenuate-fs');
-
-14. // attenuate
-
-15. const altProcess = attenuateProcess(process);
-
-16. const altOs = attenuateOs(os);
-
-17. const altFs = attenuateFs(fs);
-
-18. const chalk = pureChalk(altOs, altProcess);
-
-20. const todoFile =  'todo.txt';
-
-22. const addTodoToFile =  (todo, priority =  'Medium')  =>  {
-
-23. altFs.appendFile(todoFile, `${priority}: ${todo} \n`, err =>  {
-
-24. if  (err)  throw err;
-
-25. console.log('Todo was added');
-
-26. });
-
-27. };
-
-28. ...
+const addTodoToFile =  (todo, priority =  'Medium')  =>  {
+  altFs.appendFile(todoFile, `${priority}: ${todo} \n`, err =>  {
+    if  (err)  throw err;
+    console.log('Todo was added');
+  });
+};
+...
+```
 
 And attenuate-os and attenuate-process would look like this:
 
-1.  const attenuateOs =  (originalOs)  =>
+```js
+const attenuateOs =  (originalOs)  =>
+  // we know the result is pure
+  harden({
+    release: originalOs.release,
+  });
 
-2.  // we know the result is pure
+module.exports  = attenuateOs;
+```
 
-3.  harden({
-
-4.  release: originalOs.release,
-
-5.  });
-
-7.  module.exports  = attenuateOs;
-
-1.  const attenuateProcess =  (originalProcess)  =>
-
-2.  // this is not pure - stdout and stderr are resources
-
-3.  harden({
-
-4.  env: originalProcess.env,
-
-5.  platform:  'win32',
-
-6.  versions: originalProcess.versions,
-
-7.  stdout: originalProcess.stdout,
-
-8.  stderr: originalProcess.stderr,
-
-9.  });
-
-10. module.exports  = attenuateProcess;
+```js
+const attenuateProcess =  (originalProcess)  =>
+  // this is not pure - stdout and stderr are resources
+  harden({
+    env: originalProcess.env,
+    platform:  'win32',
+    versions: originalProcess.versions,
+    stdout: originalProcess.stdout,
+    stderr: originalProcess.stderr,
+  });
+module.exports  = attenuateProcess;
+```
 
 Now, chalk and supports-color cannot use os to do dangerous things like change the priority of processes.
 
@@ -367,91 +316,58 @@ But what happens if we don't have the opportunity to rewrite the modules we want
 
 ([example code](https://github.com/katelynsills/legacy-todo))
 
-In the legacy approach, our todo app code doesn't do the attenuating - it looks like a normal Node app again. We also don't touch chalk or supports-color. To control the access that chalk and supports-color have, we instead use a manifest to describe the relationship, and then our loaders enforce the manifest, including using attenuating modules. The manifest would look like your normal package.json, but with an additional property, resources:
+In the legacy approach, our todo app code doesn't do the attenuating - it looks like a normal Node.js app again. We also don't touch chalk or supports-color. To control the access that chalk and supports-color have, we instead use a manifest to describe the relationship, and then our loaders enforce the manifest, including using attenuating modules. The manifest would look like your normal package.json, but with an additional property, `resources`:
 
-1.  "resources":  {
+```json
+"resources":  {
+  "index": {
+    "modules": {
+      "fs":  "alt-fs",
+      "chalk": true
+    }
+  },
+  "chalk":  {
+    "modules":  {
+      "supports-color":  true
+    }
+  },
+  "alt-fs":  {
+    "modules":  {
+      "fs":  true
+    }
+  },
+  "alt-os":  {
+    "modules":  {
+      "os":  true
+    }
+  },
+  "alt-process":  {
+    "globals":  {
+      "process":  true
+    }
+  },
+  "supports-color":  {
+    "modules":  {
+      "os":  "alt-os"
+    },
+    "globals":  {
+      "process":  "alt-process"
+    }
+  }
+}
+```
 
-2.  "index": {
+Instead of `fs`, our todo-app index.js is handed the `alt-fs` module by the module loader. From the todo-app perspective, it thinks it's getting `fs`, and would only find out otherwise if it goes outside the bounds of what is provided to it.
 
-3.  "modules": {
+`alt-fs` is simply the attenuated version of `fs`, exported as a module.
 
-4.  "fs":  "alt-fs",
+```js
+const attenuateFs = require('attenuate-fs');
+const fs = require('fs');
+module.exports  = attenuateFs(fs);
+```
 
-5.  "chalk": true
-
-6.  }
-
-7.  },
-
-8.  "chalk":  {
-
-9.  "modules":  {
-
-10. "supports-color":  true
-
-11. }
-
-12. },
-
-13. "alt-fs":  {
-
-14. "modules":  {
-
-15. "fs":  true
-
-16. }
-
-17. },
-
-18. "alt-os":  {
-
-19. "modules":  {
-
-20. "os":  true
-
-21. }
-
-22. },
-
-23. "alt-process":  {
-
-24. "globals":  {
-
-25. "process":  true
-
-26. }
-
-27. },
-
-28. "supports-color":  {
-
-29. "modules":  {
-
-30. "os":  "alt-os"
-
-31. },
-
-32. "globals":  {
-
-33. "process":  "alt-process"
-
-34. }
-
-35. }
-
-36. }
-
-Instead of fs, our todo-app index.js is handed the alt-fs module by the module loader. From the todo-app perspective, it thinks it's getting fs, and would only find out otherwise if it goes outside the bounds of what is provided to it.
-
-alt-fs is simply the attenuated version of fs, exported as a module.
-
-1.  const attenuateFs = require('attenuate-fs');
-
-2.  const fs = require('fs');
-
-4.  module.exports  = attenuateFs(fs);
-
-We build similar attenuating modules for os and process - alt-os and alt-process.
+We build similar attenuating modules for `os` and `process` - `alt-os` and `alt-process`.
 
 Implementation Details
 ----------------------
@@ -579,17 +495,15 @@ We can assume that the loader hardens our exports. We don't have to harden the e
 
 A value is purifiable if hardening the value makes it pure. Let's use the following examples to explain this further:
 
+```js
 function makePoint(x, y) {
-
  return {x, y}
-
 }
 
 function makeCounter(count) {
-
  return {countUp() { return ++count; }}  
-
 }
+```
 
 Both makePoint and makeCounter are purifiable - if hardened they're pure. The record returned by makePoint is purifiable if and only if x and y are purifiable. The harden function will reach both x and y and attempt to harden them as well. If harden returns successfully, then the record, the value of x, and the value of y are all hardened. If harden throws, then we do not assume any of these are hardened.
 
@@ -599,11 +513,11 @@ A purifiable expression is one that we know evaluates only to purifiable values.
 
 Now let's take this example:
 
+```js
 function makePoint(x, y) {
-
  return {x: +x, y: +y}
-
 }
+```
 
 '+' coerces to a number, and now we know that the x and y properties are numbers, and the object that is returned is therefore purifiable.
 
@@ -629,15 +543,17 @@ The method call expression bob.foo(carol) - we just say this is not purifiable f
 
 -   A function expression is purifiable if every variable that it captures is not assigned to and each of those variables are initialized to pure values. For example:
 
+```js
 let x = {};
-
 function f() { return x };
+```
 
 Even though the empty object x is purifiable, f is not purifiable in this example, and the reason is that hardening f does not harden x. Therefore f can be used as a communications channel. For example, Alice and Bob could both have a hardened f and then they both call it, they get the same mutable object, and can use it communicate with each other. By contrast:
 
+```js
 let x = harden({});
-
 function f() { return x }; // f is purifiable
+```
 
 The function's prototype property has to be a purifiable value. If the function's prototype is never mentioned in the module, it is still purifiable, because the prototype is initialized to an empty object that inherits from Object.prototype.
 
@@ -675,28 +591,34 @@ We will go even stricter - If foo.x = [anything], then we say foo is not purifia
 
 -   Temporal dead zone - In JavaScript a variable can be accessed before it is initialized.
 
+```js
 {
-
  foo();
-
  let x = 3;
-
  function foo() {
-
    return x;
-
  }
-
 } // this throws an error - the variable is in scope but in an uninitialized state
+```
 
 Temporal dead zone: the interval of time from when the variable comes into existence, until the variable is initialized. If the variable is accessed, by reading or assigning to it, before it is initialized, then an error is thrown. The result is that this is an observable change of state and therefore a possible communications channel.
 
 TC39 would have prefered a static guarantee that the variable cannot be accessed during the temporal dead zone, but for backwards compatibility we gave up on trying to have a static rule in the standard because we would have to reject too many common coding patterns. The purity checker needs to make a static check and thus needs to be stricter than we (as tc39) were willing to be for the language in general, so the purity checker must verify that all potential significant variables are never accessed during their temporal dead zone. We can do this by adopting Doug Crockford's rule that a variable can only be used textually below the declaration (i.e. only in later statements) - it has to verify this for all variables, not just the one in question. If this is true of all variables, our example of this would be correctly identified as not pure. We need to make one exception - a consecutive sequence of function declarations is considered one unit, where the functions within the unit can refer to each other even if a use is above a declaration - i.e. in the case of mutually recursive functions.
 
-References
+References and Footnotes
 ==========
 
-[1] A Capability-Based Module System for Authority Control. Darya Melicher, Yangqingwei Shi, Alex Potanin, and Jonathan Aldrich. European Conference on Object-Oriented Programming (ECOOP), 2017.
+[1] Primordials are all of the JavaScript objects that are mandated by the ECMAScript spec to exist before the code starts running, but not including the global object. Host-mandated objects, such as document or require, are not primordials. All intrinsics are primordials. 
+
+[2] A Capability-Based Module System for Authority Control. Darya Melicher, Yangqingwei Shi, Alex Potanin, and Jonathan Aldrich. European Conference on Object-Oriented Programming (ECOOP), 2017.
+
+[3]  These definitions assume that the module’s exports are hardened by the loader, and that the module’s imports are themselves pure as enforced by the loader. 
+
+[4] Previous named `def`
+
+[5] The temporal dead zone is the interval of time from when the variable comes into existence, until the variable is initialized. If the variable is accessed, by reading or assigning to it, before it is initialized, then an error is thrown. The result is that this is an observable change of state and therefore a possible communications channel. 
+
+[6] It is differently tricky for CJS and EcmaScript modules and weird when these are mixed. If needed, we can treat an SCC (strongly connected component, i.e., an import cycle among modules) as a single module for the purpose of analysis, and require only that the SCC as a whole only imports pure modules and only exports pure values. However, this requires that the whole SCC be available for one joint static analysis.
 
 -----
 

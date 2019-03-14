@@ -81,3 +81,9 @@ typings/
 
 # DynamoDB Local files
 .dynamodb/
+
+#jekyll
+_site/
+.sass-cache/
+.jekyll-cache/
+.jekyll-metadata

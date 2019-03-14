@@ -1,21 +1,21 @@
-# Safe JavaScript Modules
-
-## Motivation
-
-If you do an `npm install`, the package that is installed can do tremendous damage. It can read your files, write to your files, and send your files and data over the network, among other things.
-
-One proposed solution is to stop using other people's code. However, we think this is a non-starter. Code reuse creates a rich programming environment where we can build on each other's work. Having to write everything ourselves is a significant drag on creative activity. 
-
-The solution is to allow the use of third-party code, but to prevent that code from gaining access to authority (like file system or network access) unless explicitly given. Moreover, instead of allocating authority in large chunks ("here's the entire file system") we can *attenuate* authority in fine-grained pieces such that only what is absolutely necessary is given. For instance, maybe append-only access to a particular file is all that is necessary.
-
-## Methods
-
-[SES](https://github.com/Agoric/SES) building on [Realms](https://github.com/tc39/proposal-realms) provides this safe execution environment. 
-
 ## Read the Safe Modules Doc
 
-[Read the document on Safe Modules](https://agoric.com/safe-modules/), originally written by Mark S. Miller, Darya Melicher, Kate Sills, and JF Paradis in December 2018. (The raw markdown is located in `/docs`)
+[Read the document on Safe Modules](/docs/safe-modules/), originally written by Mark S. Miller, Darya Melicher, Kate Sills, and JF Paradis in December 2018.
 
-## View the examples
+The [Jetpack documentation](/docs/jetpack) by Brian Warner may also be of interest. 
 
-Sample code is located in `/examples`.
+## Examples
+
+We start with a simple command line app that records and displays todos. The app uses the popular Chalk and Minimist packages. Chalk uses the built-in `os` module and the `process` global variable. The various examples show different ways to describe and attenuate that authority. 
+
+[Clean Todo](/examples/clean-todo)
+
+Clean Todo rewrites the packages to be ["pure"]() and has no manifest. 
+
+[Legacy Todo](/examples/legacy-todo)
+
+Legacy Todo doesn't rewrite the packages, and instead uses a manifest to provide the configuration of authority for a loader. 
+
+[Clean Index](/examples/clean-index)
+
+Clean Index expresses the top-level wiring with code consisting only of scoping and invocations to do essentially the same top level modules, given that these modules have been (re)written as pure modules. The code form is much clearer. For code known to be written in this minimal wiring subset of Jessie, there's nothing less declarative about it. The JSON form doesn't do the job it describes. It is in essentially a new language "manifest" language whose meaning one has to learn, and requiring new code to implement. The code form does the job it describes. It can be understood without learning new concepts.
