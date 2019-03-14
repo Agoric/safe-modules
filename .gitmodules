@@ -1,0 +1,12 @@
+[submodule "examples/legacy-todo"]
+	path = examples/legacy-todo
+	url = https://github.com/katelynsills/legacy-todo
+[submodule "examples/clean-todo"]
+	path = examples/clean-todo
+	url = https://github.com/katelynsills/clean-todo
+[submodule "docs/jetpack"]
+	path = docs/jetpack
+	url = https://github.com/warner/JetpackComponents/
+[submodule "examples/pure-index"]
+	path = examples/pure-index
+	url = https://github.com/erights/clean-todo/
