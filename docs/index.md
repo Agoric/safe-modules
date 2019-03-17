@@ -619,7 +619,7 @@ and `alt-process`.
     accesses the global object. We treat this as any other global
     variable reference. Currently this is not yet an issue for
     modules, but may become one depending on
-    <https://github.com/tc39/proposal-global>
+    [tc39 proposal-global](https://github.com/tc39/proposal-global).
 
 -   Which properties of the global object it uses via property
     access. This cannot be accurately determined statically, but can
