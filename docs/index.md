@@ -25,7 +25,7 @@ proposal currently at Stage 2, was proposed by some of us as a
 necessary tool to enforce the principle of least authority. The Realm
 API enables the creation of distinct global environments. This global
 environment, called a realm, has its own global object, copy of the
-standard library, and primordials[1]. A realm can contain many
+standard library, and primordials [[1](#1)]. A realm can contain many
 co-existing featherweight compartments. However, with Realms alone,
 these compartments do not provide genuine protection from each other.
 
@@ -182,7 +182,7 @@ detailed [definition below](#appendix-a-definitions)):
 
 1.  have no side effects.
 
-**Pure modules** are those modules that[3]:
+**Pure modules** are those modules that [[3](#3)]:
 
 1.  do not encompass system resources (i.e. network access),
 
@@ -230,7 +230,7 @@ loss of security. Resource modules, however, (and this includes
 everything that is not verifiably pure), must be loaded into separate
 SES compartments.
 
-SES provides a `harden`[4] function (see
+SES provides a `harden` [[4](#4)] function (see
 [@agoric/harden](https://github.com/Agoric/Harden#harden) for more
 information), which performs a transitive walk over properties that
 aren't inherited, freezing every object it encounters. Harden
@@ -264,8 +264,9 @@ like this:
 -   The value that `x` is initialized to is the result of `require`
     and thus assumed to be pure.
 
--   No variable can be accessed during their temporal dead
-    zone[5]. Within cyclic imports, this gets tricky to verify[6].
+-   No variable can be accessed during their temporal dead zone
+    [[5](#5)]. Within cyclic imports, this gets tricky to verify
+    [[6](#6)].
 
 -   Note that the `y` parameter of `foo` may not be frozen. The array
     returned by `foo` is not frozen. All this is fine in SES and does
