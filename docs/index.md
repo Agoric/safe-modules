@@ -174,7 +174,7 @@ Wyvern, Darya Melicher, is one of the authors of this proposal.) We
 adapt Wyvern's definitions as follows:
 
 **Pure values** (pure objects in Wyvern) are values that (see the
-detailed [definition below](#pure-values-definition)):
+detailed [definition below](#appendix-a-definitions)):
 
 1.  do not encompass system resources (i.e. network access),
 
@@ -1064,36 +1064,37 @@ declaration - i.e. in the case of mutually recursive functions.
 
 ## References and Footnotes
 
-[1] Primordials are all of the JavaScript objects that are mandated by
-the ECMAScript spec to exist before the code starts running, but not
-including the global object. Host-mandated objects, such as document
-or require, are not primordials. All intrinsics are primordials.
+<a name="1">[1]</a> Primordials are all of the JavaScript objects that
+are mandated by the ECMAScript spec to exist before the code starts
+running, but not including the global object. Host-mandated objects,
+such as document or require, are not primordials. All intrinsics are
+primordials.
 
-[2] A Capability-Based Module System for Authority Control. Darya
-Melicher, Yangqingwei Shi, Alex Potanin, and Jonathan
+<a name="2">[2]</a> A Capability-Based Module System for Authority
+Control. Darya Melicher, Yangqingwei Shi, Alex Potanin, and Jonathan
 Aldrich. European Conference on Object-Oriented Programming (ECOOP),
 2017.
 
-[3] These definitions assume that the module’s exports are hardened by
-the loader, and that the module’s imports are themselves pure as
-enforced by the loader.
+<a name="3">[3]</a> These definitions assume that the module’s exports
+are hardened by the loader, and that the module’s imports are
+themselves pure as enforced by the loader.
 
-[4] Previous named `def`
+<a name="4">[4]</a> Previous named `def`
 
-[5] The temporal dead zone is the interval of time from when the
-variable comes into existence, until the variable is initialized. If
-the variable is accessed, by reading or assigning to it, before it is
-initialized, then an error is thrown. The result is that this is an
-observable change of state and therefore a possible communications
-channel.
+<a name="5">[5]</a> The temporal dead zone is the interval of time
+from when the variable comes into existence, until the variable is
+initialized. If the variable is accessed, by reading or assigning to
+it, before it is initialized, then an error is thrown. The result is
+that this is an observable change of state and therefore a possible
+communications channel.
 
-[6] It is differently tricky for CJS and EcmaScript modules and weird
-when these are mixed. If needed, we can treat an SCC (strongly
-connected component, i.e., an import cycle among modules) as a single
-module for the purpose of analysis, and require only that the SCC as a
-whole only imports pure modules and only exports pure values. However,
-this requires that the whole SCC be available for one joint static
-analysis.
+<a name="6">[6]</a> It is differently tricky for CJS and EcmaScript
+modules and weird when these are mixed. If needed, we can treat an SCC
+(strongly connected component, i.e., an import cycle among modules) as
+a single module for the purpose of analysis, and require only that the
+SCC as a whole only imports pure modules and only exports pure
+values. However, this requires that the whole SCC be available for one
+joint static analysis.
 
 -----
 
