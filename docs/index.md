@@ -784,7 +784,8 @@ Note the following:
 
 -   Resource use, time, space, GC, can be non-deterministic
 
--   Debugging info, like stack frames, is available only to privileged entities
+-   Debugging info, like stack frames, is available only to privileged
+    entities
 
 -   Unprivileged computation cannot sense non-determinism
 
@@ -951,7 +952,8 @@ that inherits from Object.prototype.
     non-reflective one) you would be invoking the getter, not
     obtaining the getter function.
 
--   Array literal - this is purifiable if all the argument expressions are purifiable.
+-   Array literal - this is purifiable if all the argument expressions
+    are purifiable.
 
 -   Regex literal - unconditionally purifiable.
 
@@ -1051,15 +1053,17 @@ patterns. The purity checker needs to make a static check and thus
 needs to be stricter than we (as tc39) were willing to be for the
 language in general, so the purity checker must verify that all
 potential significant variables are never accessed during their
-temporal dead zone. We can do this by adopting Doug Crockford's rule
-that a variable can only be used textually below the declaration
-(i.e. only in later statements) - it has to verify this for all
-variables, not just the one in question. If this is true of all
-variables, our example of this would be correctly identified as not
-pure. We need to make one exception - a consecutive sequence of
-function declarations is considered one unit, where the functions
-within the unit can refer to each other even if a use is above a
-declaration - i.e. in the case of mutually recursive functions.
+temporal dead zone.
+
+We can verify this by adopting Doug Crockford's rule that a variable
+can only be used textually below the declaration (i.e. only in later
+statements) - it has to verify this for all variables, not just the
+one in question. If this is true of all variables, our example of this
+would be correctly identified as not pure. We need to make one
+exception - a consecutive sequence of function declarations is
+considered one unit, where the functions within the unit can refer to
+each other even if a use is above a declaration - i.e. in the case of
+mutually recursive functions.
 
 
 ## References and Footnotes
