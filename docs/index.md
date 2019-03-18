@@ -169,12 +169,11 @@ We follow the threat model as described in the Wyvern paper [[2](#2)],
 including two common scenarios: malicious third-party code and
 fallible in-house code. Malicious third-party code is a major
 problem. Currently in Node, seemingly simplistic packages can access
-powerful resources such as network access, and could be sending our
-todo data to anywhere. Furthermore, because they also have access to
-the file system, they can send all our data anywhere. As in the Wyvern
-paper, we also care about fallible in-house code. For instance, we
-might be concerned that our own application will overwrite an
-important file if misconfigured.
+the network, and could be sending our todo data to anywhere. When they
+also have access to the file system, they can send all our data
+anywhere. As in the Wyvern paper, we also care about fallible in-house
+code. For instance, we might be concerned that our own application
+will overwrite an important file if misconfigured.
 
 
 ## Proposal
@@ -198,35 +197,24 @@ adapt Wyvern's definitions as follows:
 detailed [definition below](#appendix-a-definitions)):
 
 1.  do not encompass system resources (i.e. network access),
-
 1.  do not contain or transitively reference any mutable state,
-
 1.  have no side effects.
 
 **Pure modules** are those modules that [[3](#3)]:
 
 1.  do not encompass system resources (i.e. network access),
-
 1.  do not contain or transitively reference any mutable state,
-
 1.  have no side effects,
-
 1.  do not import any resource module,
-
 1.  only export pure values, and
-
 1.  declare themselves to be pure.
 
 **Resource modules** are defined as modules that either:
 
 1.  encapsulate system resources,
-
 1.  contain mutable state,
-
 1.  have side effects,
-
 1.  use other resource modules, or
-
 1.  export non pure values.
 
 For example, the popular `request` package would be a resource module
@@ -248,18 +236,48 @@ Our distinction between pure and resource modules allows us to treat
 them differently. Verifiably pure modules can be loaded into a SES
 root realm together and shared with all its compartments without a
 loss of security. Resource modules, however, (and this includes
-everything that is not verifiably pure), must be loaded into separate
-SES compartments.
+everything that is not verifiably pure), provide the ability to cause
+or sense effects, and thus must only be provided by explicit
+authorization to that code which legitimately needs access to it.
+
+To accommodate both of these needs, we associate a shared *pure
+loader* with a root realm, which only loads pure modules. We associate
+a *resource loader* with a compartment. Code loaded by a compartment's
+loader will evaluate in the scope of that compartment, and will import
+according to that compartment's loader. Loaders are configured to
+delegate imports to other loaders within limits and via
+renaming. Thus, importing `'foo'` within compartment `X` might import
+`'bar'` from compartment `Y`, loading `'bar'` in compartment
+`Y`. Thus, code loaded within compartment `X` can import something
+exported by code loaded into compartment `Y`. We can take modules
+meant to be linked together in a conventional sense, and instead link
+them together across compartmemts within a shared root realm.
+
+The pure loader will only load modules that have been statically
+verified to be *purifiable*. A module is puribiable, if, under the
+assumption that all values it imports are pure and the all values it
+exports get hardened (see below), then all values it exports are
+pure. For example, the following module is verifiably purifiable:
+
+```js
+let x = require("x");
+
+function foo(y) {
+  return [x, y];
+}
+
+exports = {x, foo};
+```
 
 SES provides a `harden` [[4](#4)] function (see
 [@agoric/harden](https://github.com/Agoric/Harden#harden) for more
-information), which performs a transitive walk over properties that
-aren't inherited, freezing every object it encounters. Harden
-additionally verifies that the objects that these objects inherit from
-are themselves already hardened.  Loaders for both pure and resource
-modules will apply harden automatically to all exported and imported
-values. For example, a loader would apply harden at the following
-points:
+information), which performs a transitive walk over *own properties*,
+i.e., properties that are not inherited, freezing every object it
+encounters. Harden additionally verifies that the objects that these
+objects inherit from are themselves already hardened. The pure loader
+will apply harden automatically to all exported and imported
+values. For example, the pure loader would effective apply harden at
+the following points, while also guaranteeing that `x` is pure.
 
 ```js
 let x = harden(require("x"));
@@ -272,9 +290,9 @@ exports = harden({x, foo});
 ```
 
 Given the use of harden and the assumption that module "x" is also
-verifiably pure, the above module is a pure module. The thought
-process of verifying that the above module is a pure module would go
-like this:
+verifiably purifiable, the above module is a pure module. The thought
+process of verifying that the above module is purifiable would go like
+this:
 
 -   Hardening the returned record freezes that record and hardens the
     function foo.
