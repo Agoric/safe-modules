@@ -16,60 +16,102 @@ The goal of this proposal is enforce the [Principle of Least Authority
 (POLA)](https://agoric.com/references/#pola) on all imported modules,
 meaning that the modules should only be given the authority that they
 need to accomplish their tasks and no more. To accomplish this goal,
-we must have the ability to isolate modules from each other as well as
-the ability to cut off access to powerful resources such as the file
-system or network by default.
+we must be able to isolate modules from each other, and to cut off
+access to powerful resources such as the file system or network,
+except as legitimately needed.
 
-[Realms](https://github.com/tc39/proposal-realms), an ECMAScript
-proposal currently at Stage 2, was proposed by some of us as a
-necessary tool to enforce the principle of least authority. The Realm
-API enables the creation of distinct global environments. This global
-environment, called a realm, has its own global object, copy of the
-standard library, and primordials [[1](#1)]. A realm can contain many
-co-existing featherweight compartments. However, with Realms alone,
-these compartments do not provide genuine protection from each other.
+We start with *realms*, coarse-grain units of isolation already
+present in the EcmaScript spec. A realm consists of
+   * A set of *primordial objects* [[1](#1)] such a `Object`,
+     `Object.prototype`, `Array.prototype.push` --- the set of objects
+     that must exist before code starts running. Some of these
+     primordials have special roles in evaluating code in that
+     realm. For example, evaluating `[]` in a given realm will create
+     an empty array that inherits from (the original value of) that
+     realm's `Array.prototype`.
+   * A global object, global scope, and global lexical scope. When
+     code uses a variable name that it does not define, this name is
+     looked up in these containing global scopes.
+
+The [tc39 proposal Realms](https://github.com/tc39/proposal-realms) is
+an API for explicitly creating and manipulating such realms. It
+distinguishes two forms of realms, *root realms* and *featherweight
+compartments*. Creating a new root realm creates a new set of
+primordials as well as a new global object and global scope. A
+featherweight compartment is created within a root realm, and shares
+its root realm's primordials. Each featherweight compartment has its
+global object, global scope, and its own named evaluators, the `eval`
+function and the `Function` constructor, that evaluates code in that
+compartmemt's global scope.
+
+The code that creates a new root realm can add its own objects to that
+root realm's global, providing initial authority of its own design to
+the code that will run in that root realm. In this way, we enable some
+JavaScript code (that creating and customizing a root realm) to act as
+an arbitrary host to other JavaScript code (that running within the
+root realm). To the code within the root realm, these authority
+brearing objects that it finds in its global scope are as-if its host
+objects. Using the realms API, code on any platform can run other code
+within an emulation of any other platform.
+
+A root realm can be an almost perfect sandbox. At the moment of
+creation, the creator of a root realm has the only reference into the
+root realm. The root realm is otherwise fully isolated from the rest
+of the world. It has no ability to cause effects to the world outside
+itself. Aside from the grandfathered-in exceptions of `Date.now()` and
+`new Date()` (see below), it has no abilities to sense effects from
+the world outside itself. Malicious code loaded into an isolated root
+realm cannot do any significant damage. However, with the Realms
+proposal alone, there is no practical way to interact safely with such
+potentially malicious code.
+
+A root realm can contain many co-existing featherweight
+compartments. However, with the Realms proposal alone, these
+compartments are not protected from each other. They share the same
+primordials provided by their common root realm. Because all
+primordials start mutable, code in any of the compartments can engage
+in *prototype poisoning*, corrupting the shared primordials that code
+in other compartments rely on.
 
 To that end, we built [Secure EcmaScript
 (SES)](https://github.com/agoric/ses) on top of Realms. SES hardens
-the root realm such that these compartments are genuine protection
-domains. Each compartment shares its root realm's primordials but has
-its own global object, global scope, and named evaluators (the eval
-function and the Function constructor), which evaluate code in that
-compartment's global scope. With SES, we successfully achieve the
-isolation of code execution.
+the root realm such that all the shared primordials are transitively
+frozen, transitively immutable, lack any I/O abilities or abilities to
+cause or sense any state outside themselves.
 
-However, while Realms and SES provide security, they do not yet
-incorporate a module system that easily allows for code reuse. This
-document outlines a plan for a module system that is easy to use and
-secure enough to prevent incidents like the event-stream exploit.
+However, while SES provides security, SES does not yet incorporate a
+module system that easily allows for code reuse. This document
+outlines a plan for a module system that is easy to use and secure
+enough to prevent incidents like the event-stream exploit.
 
 
 ## Problems with Current JavaScript Modules
 
-Prior to the ES module system, linking various libraries could only be
-achieved by mutation and lookup in the global scope. For example,
-libraries such as jQuery were imported by loading a script file that
-would add a property (such as `$`) to `window`. Mutating the global
-scope in this way was accident-prone and unable to scale to multiple
-layers of dependencies. To address this problem, two module systems
-emerged for JavaScript: Common JS and the EcmaScript module system.
+Prior to JavaScript module systems, linking various libraries could
+only be achieved by mutation and lookup in the global scope. For
+example, libraries such as jQuery were effectively "imported" by
+loading a script file that would add a property (such as `$`) to
+`window` (the browser's global object). Mutating the global scope in
+this way was accident-prone and unable to scale to multiple layers of
+dependencies. To address this problem, two module systems emerged for
+JavaScript: the Common JS module system (CJS) and the standard
+EcmaScript module system (ESM).
 
-The Common JS module system (CJS) emerged from efforts to run
-JavaScript on the server side and became the module system used by
-Node.js. Because CJS modules could not be used in the browser, other
-module systems emerged, including the standard EcmaScript module
-system (ESM), which enables static linkage analysis and is now
-available on all platforms. In the meantime, CJS modules became
-sufficiently common that host independent CJS modules are now
-supported on all platforms, sometimes through "bundlers," code that
-transforms a collection of CJS and ESM modules into standard scripts.
+CJS emerged from efforts to run JavaScript on the server side and
+became the module system used by Node.js. Because CJS modules could
+not be used in the browser, other module systems emerged including
+ESM, which enables static linkage analysis and is now available on all
+platforms. In the meantime, CJS modules became sufficiently common
+that host independent CJS modules are now supported on all platforms,
+sometimes through "bundlers," code that transforms a collection of CJS
+and ESM modules into standard scripts.
 
 Both CJS and ESM have become entrenched to the point that any
 realistic module system for JavaScript must accommodate their
 co-existence, even though standards documents only acknowledge the
 existence of ESM. Collections of both kinds of modules are delivered
 in `packages`, often distributed through npm or similar systems. For
-npm and some others, a package comes with a manifest, named
+npm and some others, a package comes with a manifest named
 `package.json`. There is now a massive legacy of useful
 packages. Systems are now built by linking together many modules
 written by many different parties into a single program. Often, this
@@ -79,32 +121,20 @@ together the functionality expressed by this great number of modules.
 However, even though an application can be divided into small units of
 independent and reusable code, nothing was done to protect these
 modules from each other. Currently modules can interfere with other
-modules, either unintentionally (as in the case of accidental
-tampering) or intentionally, as in the case of malicious code. In both
-cases, such interference limits the scale of systems we can compose
-reliably. We must find ways to use modules and compose them together,
-so that they can cooperate as we intend when things go well, but limit
-the damage when things go badly.
+modules, either accidentally (bugs), or intentionally (malicious
+code). In both cases, such interference limits the scale of systems we
+can compose reliably. We must find ways to use modules and compose
+them together, so that they can cooperate as we intend when things go
+well, but limit the damage when things go badly.
 
-The current design of the JavaScript language and module systems give
-rise to the following vulnerabilities that allow for destructive
-interference:
-
--   All these modules are typically loaded into one shared realm with
-    one set of primordials, one global scope, and one global object,
-    all of which are mutable. As mentioned above, this leads to
-    accidental or intentional interference between
-    modules. Fortunately, a widely recognized best practice is for
-    libraries to avoid mutating the shared primordials.
+Even starting from a SES environment, if we naively incorporated
+existing JavaScript module systems as is, we would have the following
+vulnerabilities:
 
 -   Imports are authority bearing. A module not only gains read or
     write access to the global scope where it's imported, it gains the
     same ambient authority as the main program, meaning that it gains
     access to all available APIs with the same execution rights.
-
--   There is no clear contract between a module and the objects
-    accessible via the global scope. Some modules can only work in a
-    browser, others only in Node.js.
 
 -   The legacy linking system via global declarations and lookups is
     available and still sometimes used. There is no guarantee that all
@@ -116,30 +146,21 @@ interference:
     powerful instances that are shared by universal access to one
     shared import namespace.
 
--   Dynamic imports are not statically analyzable. References to other
-    modules can be constructed at runtime.
-
--   The platform provides the program with ambient authority in the
-    form of objects representing powerful and dangerous capabilities
-    (such as accessing the file system) populating the global scope
-    and global object, available to all modules in that program, even
-    though most modules need few or none of those.
+-   Dynamic imports are not statically analyzable. Both the CJS
+    `require()` function and the ESM `import()` expression accept
+    computed strings.
 
 -   Through the one shared import namespace, any module can load any
     other module, preventing any encapsulation of internal modules
     within larger subsystems.
 
--   Modules can hold and share a state, allowing unintended and
+-   A modules can contain top-level mutable state, allowing unintended and
     unauthorized communications channels. For example, modules can
     export:
-
-    -   A variable.
-
+    -   An assignable variable.
     -   A mutable object.
-
-    -   A function which closes over a variable.
-
-    -   An object which can hold a state, for example, a WeakMap.
+    -   A function which closes over an assignable variable.
+    -   An object which can hold state such as a Map.
 
 
 ## Threat Model
