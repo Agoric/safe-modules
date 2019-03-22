@@ -112,12 +112,10 @@ enough to prevent incidents like the event-stream exploit.
 
 We follow the threat model as described in the Wyvern paper [[2](#2)],
 including two common scenarios: malicious third-party code and
-fallible in-house code. Malicious third-party code is a major
-problem. Currently in Node, seemingly simplistic packages can access
-the network, and could be sending our todo data to anywhere. When they
-also have access to the file system, they can send all our data
-anywhere. As in the Wyvern paper, we also care about fallible in-house
-code. For instance, we might be concerned that our own application
+fallible in-house code. Node.js currently has no protections against
+malicious third-party code -- seemingly simple packages can access the
+entire files system and send our data off to anywhere. Fallible in-house
+code is also a worry. For instance, we might be concerned that our own application
 will overwrite an important file if misconfigured.
 
 ## Pure and Resource Modules
@@ -607,4 +605,3 @@ are hardened by the loader, and that the module’s imports are
 themselves pure as enforced by the loader.
 
 <a name="4">[4]</a> Previous named `def`
-
