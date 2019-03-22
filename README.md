@@ -294,7 +294,7 @@ approaches.
 
 ### Functional Approach
 
-([Working repository "clean-todo" here](./examples/clean-todo))
+([Working repository "clean-todo" here](https://github.com/katelynsills/clean-todo))
 
 The functional approach is the most straightforward. Our todo app
 functionality uses three dangerous resources: the built-in node
@@ -487,7 +487,7 @@ modules we want to use? Then we can use the legacy approach.
 
 #### Legacy Approach
 
-([example code](./examples/legacy-todo))
+([example code](https://github.com/katelynsills/legacy-todo))
 
 In the legacy approach, our todo app code doesn't do the attenuating -
 it looks like a normal Node.js app again. We also don't touch chalk or
