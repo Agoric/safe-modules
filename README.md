@@ -131,7 +131,7 @@ Wyvern, Darya Melicher, is one of the authors of this proposal.) We
 adapt Wyvern's definitions as follows:
 
 **Pure values** (pure objects in Wyvern) are values that (see the
-detailed [definition here](./appendix-a-definitions)):
+detailed [definition here](./DEFINITIONS.md)):
 
 1.  do not encompass system resources (i.e. network access),
 1.  do not contain or transitively reference any mutable state,
