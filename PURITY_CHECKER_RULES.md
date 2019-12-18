@@ -7,8 +7,8 @@ We aren't trying to write the purity checker such that it transitively
 applies to the modules it imports because that makes things like
 cycles hard to check. Rather, if a given loader only imports
 conditionally-pure modules, i.e., modules that would be pure if their
-imports are pure, than a self contained graph of such conditionally
-pure modules should be pure. Thus, a conditionally pure module is pure
+imports are pure, then a self contained graph of such conditionally
+pure modules should be pure. Thus, a conditionally-pure module is pure
 when loaded by that loader.
 
 We can assume that the loader hardens our exports. We don't have to
@@ -27,16 +27,16 @@ function makeCounter(count) {
 }
 ```
 
-Both makePoint and makeCounter are purifiable - if hardened they're
-pure. The record returned by makePoint is purifiable if and only if x
-and y are purifiable. The harden function will reach both x and y and
+Both `makePoint` and `makeCounter` are purifiable - if hardened they are
+pure. The record returned by `makePoint` is purifiable if and only if `x`
+and `y` are purifiable. The harden function will reach both `x` and `y` and
 attempt to harden them as well. If harden returns successfully, then
-the record, the value of x, and the value of y are all hardened. If
+the record, the value of `x`, and the value of `y` are all hardened. If
 harden throws, then we do not assume any of these are hardened.
 
-If you harden the counter returned by makeCount, harden will be
-applied to the countUp method. But the countUp method captures a
-lexical variable that is assigned to, and therefore the countUp method
+If you harden the counter returned by `makeCounter`, harden will be
+applied to the `countUp` method. But the `countUp` method captures a
+lexical `count` variable that is assigned to. Therefore the `countUp` method
 is not purifiable, and therefore the object containing it is not
 purifiable either.
 
@@ -46,13 +46,14 @@ purifiable values.
 Now let's take this example:
 
 ```js
-function makePoint(x, y) {
+function makePoint2(x, y) {
  return {x: +x, y: +y}
 }
 ```
 
-'+' coerces to a number, and now we know that the x and y properties
-are numbers, and the object that is returned is therefore purifiable.
+Unary `+` coerces its operand to a number, se we know that the `x` and
+`y` properties are numbers, and the object that is returned is therefore
+purifiable.
 
 Our starting rule for determining that a module is pure is that it is
 only exporting purifiable values, that is, values that become pure
@@ -61,75 +62,67 @@ when hardened.
 In order to know that we need to take a look at the expression
 evaluating to those values.
 
-We need to make sure that the value of the exports variable at the
-moment that the module finishes executing is itself purifiable. The
-rules that we conservatively apply will support exports = purifiable
-expression.
-
-We won't try to support the incremental export yet. In other words,
- having export.foo = bar throughout the module file. We can come back
-to this.
+Most of our observations apply equally to CJS modules and ESM modules,
+where *exports* means the values exported by a module either by static
+`export` declarations or assignments to the `exports` variable, and
+*imports* means the values obtained either by static `import`
+declarations or calls to `require`. CJS and MSM modules
+also have the following problematic edge cases.
+   * Our rules are unsound for import cycles. For both CJS and ESM,
+     import cycles can cause the observation of
+     uninitialized or partially initialized state. Checking modules in
+     isolation means checking them in ignorance of such cycles.
+   * In a CJS module, we effectively treat `require` as a keyword.
+     We allow a CJS module to use `require` only by calling it. We
+     conservatively reject any use of `require` in any other way.
+   * In a CJS module, we effectively treat `exports` as a keyword.
+     We allow a CJS module to use `exports` in only one of two ways:
+     either by a top level statement like `exports = expr;`,
+     exporting only the value of `expr`, or by top level statements
+     like `exports.foo = expr;`, which we treat as separate named
+     exports. We conservatively reject modules that use both of these
+     styles, or that use `exports` in any other way.
+   * We reject any ESM module with a top-level `await`.
+   * We reject any ESM module that exports a live binding, i.e.,
+     that contains an assignment to an exported variable.
 
 We've now reduced the problem to the individual kinds of expression:
 
--   An expression that is just a constant value, like 3, is obviously
+-   An expression that is just a constant value, like `3`, is obviously
     purifiable because it's already pure.
 
--   An expression that is a variable name like x, to check if it's
-    purifiable, check two conditions. We look up the definition of x
-    and see if we can verify that x is initialized to a purifiable
-    value, and we also check that x is never assigned to.
+-   An expression that is a variable name, like `x`, is purifiable if
+       * `x` is initialized to the value of a purifiable expression,
+         either by a `const`, `let`, `function`, or `class` declaration.
+       * `x` is not assigned to.
+       * The value of `x` is not used in any way that might mutate it
+         before it is hardened.
 
--   To verify a function call, you'd have to look at the function
-    definition, and if you don't have the function definition in the
-    same module, then you say that a call to a function that isn't
-    locally defined is disqualified. The expression that evaluates to
-    the arguments, each of those expressions have to be pure (harden
-    already applied) - not just purifiable - expressions. The
-    transitive hardening rules won't reach the arguments. Then we can
-    analyze the body of the function assuming that the parameters are
-    pure. In makePoint, if we see a call to makePoint with pure
-    arguments, then we know it's returning a purifiable object. If we
-    see a call to makePoint with arguments that aren't pure, then have
-    to say the function call isn't purifiable. We would then determine
-    whether any value returned is purifiable - if so then the function
-    call is purifiable.
+-  A function is purifiable if every variable that it
+   captures is not assigned to and each of those variables are
+   initialized to pure values. For example:
 
--   Arguments to the function call - the implicit `this` argument must
-    be pure.
+   ```js
+   let x = {};                 // x is purifiable
+   function f() { return x };  // f is not purifiable
+   ```
 
-The method call expression bob.foo(carol) - we just say this is not
-purifiable for now - it's too hard to reliably figure out what
-function is being called. Given that we reject method calls, we can
-consider `this` to be purifiable. If we ever did accept method calls,
-we would have to ensure that bob (the implicit this, in the example)
-is pure as well as carol is pure.
+   Even though the empty object `x` is purifiable, `f` is not purifiable in
+   this example. The reason is that hardening `f` does not harden
+   `x`. Therefore `f` can be used as a communications channel. For example,
+   Alice and Bob could both have a hardened `f` and then they both call it.
+   They get the same mutable object, and can use it communicate with each
+   other. By contrast:
 
--   A function expression is purifiable if every variable that it
-    captures is not assigned to and each of those variables are
-    initialized to pure values. For example:
+   ```js
+   let x = harden({});         // x is pure
+   function f() { return x };  // f is purifiable
+   ```
 
-```js
-let x = {};
-function f() { return x };
-```
-
-Even though the empty object x is purifiable, f is not purifiable in
-this example, and the reason is that hardening f does not harden
-x. Therefore f can be used as a communications channel. For example,
-Alice and Bob could both have a hardened f and then they both call it,
-they get the same mutable object, and can use it communicate with each
-other. By contrast:
-
-```js
-let x = harden({});
-function f() { return x };  // f is purifiable
-```
-
-The function's prototype property has to be a purifiable value. If the
-function's prototype is never mentioned in the module, it is still
-purifiable, because the prototype is initialized to an empty object
-that inherits from Object.prototype.
+   The function's `prototype` property has to be a purifiable value. If the
+   function's `prototype` is never mentioned in the module, it is still
+   purifiable, because the `prototype` is implicitly initialized to an
+   empty object that inherits from `Object.prototype`.
 
 -   Object literal - the object literal syntax can express
     initializations of its properties, and it can express what it
@@ -165,6 +158,32 @@ that inherits from Object.prototype.
     properties are purifiable, if all of its methods are purifiable,
     and if it extends (i.e. inherits from) a pure class (not just a
     purifiable class).
+
+-   To verify that a function call, like `makePoint(3, 5)`, is
+    purifiable, we look at the function definition.
+       * The function must be named and defined in the same module.
+         Otherwise the function call is rejected. This seems severe,
+         but remember, this only applies to function calls used to
+         initialize top level state, which should be relatively rare.
+       * We analyze the function's body by inlining it in the context
+         of that function call, treating each parameter as a `let`
+         declaration initializing that parameter to that argument.
+         But be careful not to confuse scopes! Within the body of
+         the function we analyze uses of the parameter variables by
+         our variable rules above.
+
+    Thus, a function call to `makePoint` with purifiable arguments
+    is itself a purifiable expression. Any other call to `makePoint`
+    is conservatively rejected.
+
+- To verify a method call, like `bob.foo(carol)` we must first analyze
+  `bob.foo` to determine what function it calls, which we usually cannot
+  do reliably. When we can, we treat it as a function call with an
+  implicit `this` argument. For non-arrow functions, we treat each
+  occurence of `this` as if it is a use of a parameter variable
+  initialized to that argument. For arrow functions, `this` is
+  like a lexical variable, defined by the implicit `this` parameter
+  of the closest enclosing non-arrow function.
 
 -   Construct / 'new' expression - we treat it like a function
     call. The implicit arguments include the function itself, what we
@@ -230,7 +249,7 @@ not purifiable.
 
 ```js
 {
-  // this throws an error - the variable is in scope but 
+  // this throws an error - the variable is in scope but
   // in an uninitialized state
   foo();
   let x = 3;
@@ -265,4 +284,3 @@ exception - a consecutive sequence of function declarations is
 considered one unit, where the functions within the unit can refer to
 each other even if a use is above a declaration - i.e. in the case of
 mutually recursive functions.
-
