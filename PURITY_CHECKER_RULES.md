@@ -92,6 +92,8 @@ following problematic edge cases.
    * We reject any ESM module that exports a live binding, i.e., that
      contains an assignment to an exported variable.
 
+### Declarative Expressions
+
 We've now reduced the problem to the individual kinds of expression.
 The exports of a module result only from the module's initialize-time
 computation, producing the module's *top level state*. Modules mostly
@@ -118,11 +120,12 @@ analyzing top level declarations:
          value before it is hardened.
        * The value of `x` is not used in any way that might mutate it
          before it is hardened. We mention this separarely because it
-         requires alias analysis.
+         requires alias analysis. See "Potential Early Mutation"
+         below.
 
    * A ***regexp literal***, like `/.*/` is unconditionally purifiable.
 
-   * An ***array literal***, like `[x,y,...rest]` is purifiable if 
+   * An ***array literal***, like `[x,y,...rest]` is purifiable if
        * the element expressions `x` and `y` are purifiable.
        * The value of the `rest` expression is unpacked into the
          array. Normally, if `rest` is purifiable, then it will unpack
@@ -133,7 +136,7 @@ analyzing top level declarations:
          purifiable.
 
    * An ***object literal***, like
-   
+
      ```js
      ({__proto__: p,
        x: x1
@@ -145,7 +148,7 @@ analyzing top level declarations:
        ...rest,
      })
      ```
-   
+
      is purifiable if it inherits from a purifiable object and all of
      its properties are initialized to purifiable values.
         * `__proto__: p` looks like a property definition, but it is
@@ -163,18 +166,18 @@ analyzing top level declarations:
           ```js
           m: function() { return q; },
           ```
-          
+
           This property is purifiable if the function expression is
           purifiable. The function expression must be anonymous
           because no variable `m` is in scope in the function's
-          body. The differences are 
+          body. The differences are
              * The new function's `name` property would actually be
                set to `m`. This does not affect purifiability.
              * The new function does not have construct
                behavior. Calling `new` on it would cause an
                error. This does not affect purifiability.
              * The new function has no `prototype` property.
-             
+
         * `get a()..., set a(newa)...` defines `a` as an accessor
           property. The *value* of the property is defined
           operationally by what the getter returns. But for purposes
@@ -182,14 +185,14 @@ analyzing top level declarations:
           accessor property, we care about its getter and setter
           functions. The property is purifiable if both of these
           functions are purifiable.
-          
+
         * `[e1]: e2` evaluates `e1` to determine the name of the
           property to initialize. It initializes it to the value of
           `e2`. This property is purifiable if the `e2` expression is
           purifiable. We don't care about the expression `e1` because
           its value will be coerced to either a string or symbol, both
           of which are pure.
-          
+
         * `...rest` unpacks the enumerable own properties of `rest` to
           define additional properties of the new object, initialized
           to the *value* of these properties on `rest`. As with
@@ -198,7 +201,7 @@ analyzing top level declarations:
           with arrays, this can also trigger programmatic behavior --- if
           `rest` has accessor properties or is a proxy. So we also
           reject `...rest` in an object literal as not purifiable.
-   
+
    * A ***function*** is purifiable if every variable that it captures
      is not assigned to and each of those variables are initialized to
      pure values. For example:
@@ -234,6 +237,8 @@ analyzing top level declarations:
      properties are purifiable, if all of its methods are purifiable,
      and if it extends (i.e. inherits from) a pure class (not just a
      purifiable class).
+
+### Call Expressions
 
 More interesting top level computation is comparatively rare, but
 still common enough for us to accommodate it when we can.
@@ -275,23 +280,17 @@ still common enough for us to accommodate it when we can.
      to be not purifiable for now, which can be revisited later if
      necessary.
 
-Notes
+### Potential Early Mutation
 
-   * If the value of a purifiable expression is subsequently mutated,
-    like by property assignment, before they are hardened, we have to
-    assume that they aren't purifiable.
+   If the value of a purifiable expression is subsequently mutated
+   before they are hardened, such as by property assignment, we have
+   to assume that they aren't purifiable.
 
-   * We would need to do a deeper analysis - take a look at everywhere
-    that the object may have gotten to, and we have to check two
-    things -
-
-   * The purifiable value doesn't escape from the module before it is
-    exported. For example, you could import something, and pass the
-    object to it. Without violating purity, the receiver could mutate
-    this argument before it is hardened.
-
-   * We need to make sure that there is no code within this module that
-    directly mutates it, such as by property assignment.
+   We would need to check that the purifiable value doesn't escape
+   from the module before it is exported. For example, you could
+   import something, and pass the object to it. Without violating
+   purity, the receiver could mutate this argument before it is
+   hardened.
 
 For example, let's say we have a function `foo`, and somewhere in the
 module an expression like `foo.x = <something not purifiable>`, then we
@@ -300,33 +299,34 @@ have to say that foo is not purifiable.
 We will go even more conservative - If `foo.x = <anything>`, then we say
 `foo` is not purifiable.
 
-   * Property lookup `foo.x` - not a purifiable expression. Same issue as
-    with method calls. We may try to make this purifiable later, but
-    we'd have to be very cautious.
+   * Property lookup `foo.x` - not a purifiable expression. Same issue
+     as with method calls. We may try to make this purifiable later,
+     but we'd have to be very cautious.
 
-   * If you just do `foo.x` in the module, does that make `foo` itself no
-    longer purifiable? I think the answer is yes. Just property lookup
-    can cause side effects, and it would take a deep analysis to be
-    able guarantee that it isn't causing side effects.
+   * If you just do `foo.x` in the module, does that make `foo` itself
+     no longer purifiable? I think the answer is yes. Just property
+     lookup can cause side effects, and it would take a deep analysis
+     to be able guarantee that it isn't causing side effects.
 
-   * Implicit coercions - if you have an expression like x + y, that
-    expression might cause the toString() or valueOf() method of x or
-    y to be invoked. Those could cause side effects and that could be
-    before the purifiable things are hardened. In order for an object
-    literal to be considered purifiable, we will start off saying that
-    it doesn't have a toString or valueOf method. Later we can relax
-    it, but for now we need to say those make it not purifiable.
+   * Implicit coercions - if you have an expression like `x + y`, that
+     expression might cause the toString() or valueOf() method of x or
+     y to be invoked. Those could cause side effects and that could be
+     before the purifiable things are hardened. In order for an object
+     literal to be considered purifiable, we will start off saying
+     that it doesn't have a toString or valueOf method. Later we can
+     relax it, but for now we need to say those make it not
+     purifiable.
 
    * Weird new things to reject because too complicated - dynamic
-    import expression, import.meta expression. If we see either of
-    those in the module, we reject the whole module. Same thing with
-    direct eval syntax - reject the whole module.
+     import expression, import.meta expression. If we see either of
+     those in the module, we reject the whole module. Same thing with
+     direct eval syntax - reject the whole module.
 
    * Rejected if there are var declarations, we are only processing
-    let, const, function and class.
+     let, const, function and class.
 
    * Temporal dead zone - In JavaScript a variable can be accessed
-    before it is initialized.
+     before it is initialized.
 
 ```js
 {
