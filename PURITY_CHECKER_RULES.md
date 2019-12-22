@@ -86,19 +86,28 @@ also have the following problematic edge cases.
    * We reject any ESM module that exports a live binding, i.e.,
      that contains an assignment to an exported variable.
 
-We've now reduced the problem to the individual kinds of expression:
+We've now reduced the problem to the individual kinds of expression.
+The exports of a module result only from the module's initialize-time
+computation, producing the module's *top level state*. Modules
+mostly do declarations at initialization time, postponing most
+interesting computation till later. We start with the expressions
+most relevant to analyzing top level declarations:
 
--   An expression that is just a constant value, like `3`, is obviously
-    purifiable because it's already pure.
+-   A ***constant***, like `3`, that has a primitive value. It
+    is obviously purifiable because it's already pure.
 
--   An expression that is a variable name, like `x`, is purifiable if
+-   A ***variable name***, like `x`, is purifiable if
        * `x` is initialized to the value of a purifiable expression,
-         either by a `const`, `let`, `function`, or `class` declaration.
-       * `x` is not assigned to.
+         either by a `const` or `let` declaration.
+         (We ignore `var` for now.)
+       * `x` is initialized to a purifiable function or class,
+          by a named `function` or `class` declaration or expression.
+       * `x` is not assigned to, making its declaration effectively
+         a `const` declaration.
        * The value of `x` is not used in any way that might mutate it
          before it is hardened.
 
--  A function is purifiable if every variable that it
+-  A ***function*** is purifiable if every variable that it
    captures is not assigned to and each of those variables are
    initialized to pure values. For example:
 
@@ -122,9 +131,10 @@ We've now reduced the problem to the individual kinds of expression:
    The function's `prototype` property has to be a purifiable value. If the
    function's `prototype` is never mentioned in the module, it is still
    purifiable, because the `prototype` is implicitly initialized to an
-   empty object that inherits from `Object.prototype`.
+   empty object that inherits from `Object.prototype`. Hardening such a
+   function will harden its unmentioned prototype.
 
--   Object literal - the object literal syntax can express
+-   An ***object literal*** - the object literal syntax can express
     initializations of its properties, and it can express what it
     inherits from. The simple statement of what we are trying to
     achieve: the object literal is purifiable if the state of what it
@@ -146,12 +156,12 @@ We've now reduced the problem to the individual kinds of expression:
     non-reflective one) you would be invoking the getter, not
     obtaining the getter function.
 
--   Array literal - this is purifiable if all the argument expressions
+-   An ***array literal*** - this is purifiable if all the argument expressions
     are purifiable.
 
--   Regex literal - unconditionally purifiable.
+-   A ***regexp literal*** is unconditionally purifiable.
 
--   Classes - A class is purifiable if it contains no elements that
+-   A ***class*** is purifiable if it contains no elements that
     are beyond the ES2017 standard. Elements from proposals that are
     still in flux at the time of this writing (such as decorators)
     should fail the purity checker. Purifiable if all of its static
@@ -159,16 +169,17 @@ We've now reduced the problem to the individual kinds of expression:
     and if it extends (i.e. inherits from) a pure class (not just a
     purifiable class).
 
--   To verify that a function call, like `makePoint(3, 5)`, is
-    purifiable, we look at the function definition.
+More interesting top level computation is comparatively rare, but still
+common enough for us to accommodate it when we can.
+
+-   A ***function call*** to a named function, like `makePoint(3, 5)`.
+    To determine whether it is purifyable, we look at the function definition.
        * The function must be named and defined in the same module.
-         Otherwise the function call is rejected. This seems severe,
-         but remember, this only applies to function calls used to
-         initialize top level state, which should be relatively rare.
+         Otherwise the function call is rejected.
        * We analyze the function's body by inlining it in the context
          of that function call, treating each parameter as a `let`
          declaration initializing that parameter to that argument.
-         But be careful not to confuse scopes! Within the body of
+         While being careful not to confuse scopes, within the body of
          the function we analyze uses of the parameter variables by
          our variable rules above.
 
@@ -176,17 +187,18 @@ We've now reduced the problem to the individual kinds of expression:
     is itself a purifiable expression. Any other call to `makePoint`
     is conservatively rejected.
 
-- To verify a method call, like `bob.foo(carol)` we must first analyze
-  `bob.foo` to determine what function it calls, which we usually cannot
-  do reliably. When we can, we treat it as a function call with an
-  implicit `this` argument. For non-arrow functions, we treat each
-  occurence of `this` as if it is a use of a parameter variable
-  initialized to that argument. For arrow functions, `this` is
-  like a lexical variable, defined by the implicit `this` parameter
-  of the closest enclosing non-arrow function.
+-   A ***method call***, like `bob.foo(carol)`. In the rare cases when
+    we can reliably determine what function is looked up by `bob.foo`,
+    we treat the method call as a function call with an
+    implicit `this` argument. For non-arrow functions, we treat each
+    occurence of `this` as if it is a use of a parameter variable
+    initialized to that argument. For arrow functions, `this` is
+    like a lexical variable, defined by the implicit `this` parameter
+    of the closest enclosing non-arrow function.
 
--   Construct / 'new' expression - we treat it like a function
-    call. The implicit arguments include the function itself, what we
+-   A ***`new` constructor call***, like `new Point(3, 5), is
+    treated like a function call. The implicit arguments include the
+    function itself, what we
     are doing the new on. That has to be pure, not just purifiable,
     and all the explicit arguments need to be pure. And the function
     itself needs to be visible in the same way as a normal call
@@ -195,6 +207,8 @@ We've now reduced the problem to the individual kinds of expression:
     case. You can also do a new on a class, which makes an instance of
     the class. We consider all instances to be not purifiable for now,
     which can be revisited later if necessary.
+
+Notes
 
 -   If the value of a purifiable expression is subsequently mutated,
     like by property assignment, before they are hardened, we have to
@@ -212,18 +226,18 @@ We've now reduced the problem to the individual kinds of expression:
 -   We need to make sure that there is no code within this module that
     directly mutates it, such as by property assignment.
 
-For example, let's say we have a function foo, and somewhere in the
-module an expression like foo.x = [something not purifiable], then we
+For example, let's say we have a function `foo`, and somewhere in the
+module an expression like `foo.x = <something not purifiable>`, then we
 have to say that foo is not purifiable.
 
-We will go even stricter - If foo.x = [anything], then we say foo is
-not purifiable.
+We will go even more conservative - If `foo.x = <anything>`, then we say
+`foo` is not purifiable.
 
--   Property lookup foo.x - not a purifiable expression. Same issue as
+-   Property lookup `foo.x` - not a purifiable expression. Same issue as
     with method calls. We may try to make this purifiable later, but
     we'd have to be very cautious.
 
--   If you just do foo.x in the module, does that make foo itself no
+-   If you just do `foo.x` in the module, does that make `foo` itself no
     longer purifiable? I think the answer is yes. Just property lookup
     can cause side effects, and it would take a deep analysis to be
     able guarantee that it isn't causing side effects.
