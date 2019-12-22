@@ -103,43 +103,102 @@ analyzing top level declarations:
     obviously purifiable because it's already pure.
 
    * A ***variable name***, like `x`, is purifiable if
+       * is the name of a whitelisted global like `Object` which we
+         assume to be pure.
+       * `x` is bound by an `import` declaration, which we assume to
+         be pure.
        * `x` is initialized to the value of a purifiable expression,
-         either by a `const` or `let` declaration.  (We ignore `var`
+         either by a `const` or `let` declaration.  (We reject `var`
          for now.)
        * `x` is initialized to a purifiable function or class, by a
           named `function` or `class` declaration or expression.
        * `x` is not assigned to, making its declaration effectively a
          `const` declaration.
+       * The variable `x` is not used in any way that might mutate its
+         value before it is hardened.
        * The value of `x` is not used in any way that might mutate it
-         before it is hardened.
+         before it is hardened. We mention this separarely because it
+         requires alias analysis.
 
-   * An ***object literal*** - the object literal syntax can express
-     initializations of its properties, and it can express what it
-     inherits from. The simple statement of what we are trying to
-     achieve: the object literal is purifiable if the state of what it
-     inherits from is a pure expression - it has to inherit from a
-     pure object, and if for its properties, we need to distinguish
-     between data and accessor properties. A data property has to be
-     initialized to a purifiable expression and there are two cases of
-     that - "propertyName :" and the method syntax. We have to insist
-     that the method itself in the method syntax is purifiable. The
-     accessor properties which are the things with get and set -
-     there's two function definitions, the getter function and the
-     setter function and we have to insist that both of the functions
-     are purifiable. Harden is doing a transitive reflective property
-     walk of the own properties where for each property it does an
-     operation "getOwnPropertyDescriptor" If it's a data property then
-     it walks the value of the data property. If it's an accessor
-     property it checks the getter function and the setting function
-     but does not invoke the getter. If you did a normal access (a
-     non-reflective one) you would be invoking the getter, not
-     obtaining the getter function.
+   * A ***regexp literal***, like `/.*/` is unconditionally purifiable.
 
-   * An ***array literal*** - this is purifiable if all the argument
-     expressions are purifiable.
+   * An ***array literal***, like `[x,y,...rest]` is purifiable if 
+       * the element expressions `x` and `y` are purifiable.
+       * The value of the `rest` expression is unpacked into the
+         array. Normally, if `rest` is purifiable, then it will unpack
+         into purifiable array elements. But if `rest` might define a
+         programmatic iterable, it could violate this assumption. Such
+         an analysis is well beyond the ambition of this document, so
+         we conservatively reject an array containing `...rest` as not
+         purifiable.
 
-   * A ***regexp literal*** is unconditionally purifiable.
+   * An ***object literal***, like
+   
+     ```js
+     ({__proto__: p,
+       x: x1
+       y,
+       m() { return q; },
+       get a() { return q; },
+       set a(newa) { q = newa; },
+       [e1]: e2,
+       ...rest,
+     })
+     ```
+   
+     is purifiable if it inherits from a purifiable object and all of
+     its properties are initialized to purifiable values.
+        * `__proto__: p` looks like a property definition, but it is
+          not. It is specially recognized syntax saying that the new
+          object inherits from the value of `p`. It is purifiable if
+          the `p` expression is purifiable. If omitted, the new object
+          inherits from `Object.prototype` which we assume to be pure.
+        * `x: x1` is a normal data property definition. It is
+          pureifiable if the `x1` expression is purifiable.
+        * `y` is equivalent to `y: y`. It is purifiable if `y` is
+          purifiable.
+        * `m() { return q; }` is concise method syntax that, for our
+          purposes, is equivalent enough to
 
+          ```js
+          m: function() { return q; },
+          ```
+          
+          This property is purifiable if the function expression is
+          purifiable. The function expression must be anonymous
+          because no variable `m` is in scope in the function's
+          body. The differences are 
+             * The new function's `name` property would actually be
+               set to `m`. This does not affect purifiability.
+             * The new function does not have construct
+               behavior. Calling `new` on it would cause an
+               error. This does not affect purifiability.
+             * The new function has no `prototype` property.
+             
+        * `get a()..., set a(newa)...` defines `a` as an accessor
+          property. The *value* of the property is defined
+          operationally by what the getter returns. But for purposes
+          of purifiability, we don't care about the value of an
+          accessor property, we care about its getter and setter
+          functions. The property is purifiable if both of these
+          functions are purifiable.
+          
+        * `[e1]: e2` evaluates `e1` to determine the name of the
+          property to initialize. It initializes it to the value of
+          `e2`. This property is purifiable if the `e2` expression is
+          purifiable. We don't care about the expression `e1` because
+          its value will be coerced to either a string or symbol, both
+          of which are pure.
+          
+        * `...rest` unpacks the enumerable own properties of `rest` to
+          define additional properties of the new object, initialized
+          to the *value* of these properties on `rest`. As with
+          `...rest` in arrays, normally, if `rest` is purifiable, then
+          it will unpack into purifiable array elements. However, as
+          with arrays, this can also trigger programmatic behavior --- if
+          `rest` has accessor properties or is a proxy. So we also
+          reject `...rest` in an object literal as not purifiable.
+   
    * A ***function*** is purifiable if every variable that it captures
      is not assigned to and each of those variables are initialized to
      pure values. For example:
